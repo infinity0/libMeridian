@@ -1,0 +1,213 @@
+Updated: June 9, 2005
+
+A Makefile is provided that works on our RedHat 9 based cluster with gcc 3.2.2.
+Typing 'make APPNAME="NameOfYourService"' will build all the evaluation 
+programs. This currently includes: 
+
+    demoMeridian    a stand-alone Meridian process
+    demoPinger      a client program that asks a Meridian node to ping a target
+    demoClosest     a client program that retrieves the closest Meridian node 
+                    to a set of targets
+    demoMultiConst  a client program that retrieves a Meridian node that 
+                    satisfies multiple latency constraints to different targets
+
+The easiest way to add Meridian to your project is to include the meridian.h
+header and create a meridian object which encapulates all of the necessary 
+state. A call to the start() method will cause the object to fork off a child
+process that handles incoming Meridian request. Calling stop() or deleting the 
+meridian object will kill the Meridian child process. Follow the sample program
+DemoMeridian.cpp for more detailed instructions. 
+
+To issue closest node discovery queries, follow the DemoClosestSearch.cpp sample
+program. The process basically consists of creating the desired packet object, 
+serializing it to a RealPacket using the object's createRealPacket() method, 
+sending off the RealPacket to the Meridian node, and wait for responses that 
+can be parsed using the static parse() method in each packet type. The 
+DemoMultiConstraint.cpp file demonstrates how to issue multi-constraint queries.
+
+Meridian is packaged together into libMeridian.a. However, a BLAS library is
+also required to build (https://sourceforge.net/projects/math-atlas), as is 
+libqhull (http://www.qhull.org), libg2c, libresolv, and zlib.
+
+NOTES:
+-   Firewall support has not been extensively tested. We don't have access to a
+    lot of geographically diverse firewalled nodes to test with. 
+-   Currently, if a firewalled host's rendavous node fails, the firewalled 
+    host's Meridian child process will gracefully terminate. The program 
+    needs to manually restart the meridian object with another rendavous node.
+-   Firewalled nodes are treated as secondary citizens. They do not participate
+    in the ring management protocol, which means non-firewalled nodes are always
+    chosen ahead of firewalled nodes as ring members. This is due to firewalled
+    nodes' inability to measure their latency to another firewalled node. This 
+    further restricts firewalled nodes to only have non-firewalled nodes as ring
+    members.
+-   Meridian as described in the paper uses PUSH gossip, along with retrieving 
+    all the peers of its seed nodes to bootstrap. In our current implementation, 
+    the bootstrap part is not in place, as it works well in practice without it.
+    However, without the boostrap, there exists some uncommon pathological 
+    cases where certain nodes in highly dense areas may end up only having 
+    outlinks to the seed nodes. The ring management protocol makes this very 
+    uncommon, and this can almost be completly mitigated by choosing the closest
+    current Meridian node as one of the seeds. One alternative that is provided
+    is to use PUSHPULL instead of PUSH gossip, which  addresses all the 
+    pathological cases, and can be turned on by adding the -DGOSSIP_PUSHPULL 
+    compile flag.
+-   Currently, we make the assumption that IP addresses are 32-bit throughout
+    the program.
+	
+Any questions regarding Meridian can be sent to Bernard at bwong@cs.cornell.edu.
+More information about Meridian can be found at
+	
+    http://www.cs.cornell.edu/~bwong/meridian
+
+Regards,
+Bernard
+
+
+Updated August 13, 2005
+
+The Meridian Query Language (MQL) has been added to the Meridian distribution. 
+MQL is a C/Python-like lanuguage that is safe, interpreted, dynamically-typed 
+and polymorphic. It is sufficiently general to express the different protocols
+described in our SIGCOMM paper, and hopefully is general enough to express
+many other network location queries.
+
+The file closestNode.b is an example of program written in MQL, and performs
+the closest node discovery and central leader election protocol. It can be
+tested by running:
+
+    demoMQL closestNode.b
+
+demoMQL is a standalone MQL interpreter, used primarily for testing and 
+debugging. It does not take any command line parameters, but simply starts
+executing from the main function of the provided query. The program 
+DSLLauncher can be used to issue queries without running a local interpreter
+and without a main function in the query, and the DSLLauncher.cpp can serve
+as an example on how to issue queries within  a user application.
+
+NOTES:
+-   I used the C grammar found at 
+        http://www.lysator.liu.se/c/ANSI-C-grammar-y.html
+        http://www.lysator.liu.se/c/ANSI-C-grammar-l.html
+    as a reference during the development of MQL.
+-   The codebase related to MQL is a little rough around the edges in 
+    readability. I will try to clean it up and restructure some of it in
+    future releases
+
+More information about the syntax and libraries associated with MQL can be
+found at:
+
+    http://www.cs.cornell.edu/People/egs/meridian/dsldescription.php
+
+Regards,
+Bernard
+
+
+Updated September 4, 2005
+
+ICMP probes has been added, and can be turned on with the compile flag
+
+    -DPLANET_LAB_SUPPORT
+
+The demo applications has been modified to support ICMP, as well as the 
+MQL interpreter with the addition of the library function get_distance_icmp.
+
+Note that ICMP support requires the Meridian process to have root privilege
+in order to create the necessary raw socket. The ICMP code has only been 
+tested on PlanetLab.
+
+Regards,
+Bernard
+
+
+Updated March 30, 2006
+
+The Meridian library now uses the autoconf/autoscan/automake toolchain to
+improve the robustness of the build process.
+
+To build and setup Meridian, simply go
+
+	./configure
+	make APPNAME="NameOfYourService"
+	make install
+	
+and the binaries and headers will be installed into the bin and include
+directory respectively. 
+
+The packages that Meridian requires have changed slightly. The package
+dependencies are now the following:
+
+	atlas
+	openssl
+	curl
+	gfortran
+	qhull
+	bind
+	zlib
+	
+The build has been tested on FC4, with gcc 4.0.1, flex 2.5.4, and bison 2.0. 
+Ubuntu 4 packages flex 2.5.31, which breaks the build process (this was
+first noted by Leandro Navarro). His fix for the problem is copied below.
+
+> leandro@bastian:~/pl/Meridian/src$ make APPNAME="sodx"
+> flex -oMQL.flex.cpp MQL.lex
+> g++ -c -I. -I../extinc -O2 -Wall -DGOSSIP_PUSHPULL -DMERIDIAN_DSL
+> -DPLANET_LAB_SUPPORT -DAPPNAME="sodx" -I. -o MQL.flex.o MQL.flex.cpp
+> /usr/include/FlexLexer.h:112: error: redefinition of 'class yyFlexLexer'
+> /usr/include/FlexLexer.h:112: error: previous definition of 'class
+> yyFlexLexer'
+> make: *** [MQL.flex.o] Error 1
+> rm MQL.flex.cpp
+>
+> I could not find initially the problem since MQL.flex.cpp was removed by
+> the Makefile.
+> In that file I found in the beginning:
+>
+>    /* The c++ scanner is a mess. The FlexLexer.h header file relies on the
+>     * following macro.
+>     */
+>    #define yyFlexLexer yyFlexLexer
+> When I commented this line, it worked !!
+
+This looks like a bug in flex, or perhaps there has been a major interface
+change in the new version. I'll try to find a better workaround for the next
+version of the Meridian library. Currently, I suggest sticking with flex 2.5.4.
+Flex 2.5.33 is also available now, perhaps this problem may have been addressed.  
+
+Please e-mail me at bwong@cs.cornell.edu for any suggestions, questions or 
+problems, I'll be happy to help.
+
+Regards,
+Bernard
+
+
+Updated Dec, 18, 2006
+
+Minor changes have been made allow the library to be compiled without errors
+on newer versions of gcc. The library has been tested to work with FC 5 with
+gcc 4.1.1. 
+
+Due to some difficulties users have in getting the atlas libraries to install
+correclty, the library has been split into two packages. The package 
+libMeridian-1.1.tar.gz uses atlas to compute hypervolumes for ring membership
+selection. The package libMeridian-1.1-noatlas.tar.gz uses a simplier 
+algorithm for selecting ring members and does not make use of atlas. 
+
+The list of packages required was not complete in the previous README. The
+complete list for FC 5 is as follows:
+
+atlas
+atlas-devel
+openssl
+curl
+curl-devel
+gfortran
+qhull
+qhull-devel
+bind
+zlib
+zlib-devel
+
+Regards,
+Bernard
+

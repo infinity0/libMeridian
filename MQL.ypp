@@ -1,0 +1,644 @@
+%{
+/******************************************************************************
+Meridian prototype distribution
+Copyright (C) 2005 Bernard Wong
+
+This program is free software; you can redistribute it and/or
+modify it under the terms of the GNU General Public License
+as published by the Free Software Foundation; either version 2
+of the License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program; if not, write to the Free Software
+Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+
+The copyright owner can be contacted by e-mail at bwong@cs.cornell.edu
+*******************************************************************************/
+
+using namespace std;
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <signal.h>
+//#include <setjmp.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/socket.h>
+#include <ucontext.h>
+#include "Marshal.h"
+#include "MQLState.h"
+#include "MeridianDSL.h"
+
+#define YYPARSE_PARAM param
+#define YYLEX_PARAM param
+
+
+ucontext_t global_env_thread;	// For ending an intepreter immediately
+//jmp_buf global_env_pc;		// For switching between threads
+//ucontext_t* global_env_pc = NULL;
+
+void yyerror(const char *str) {
+	DSL_ERROR( "%s: line %d\n", str, g_parser_line);
+}
+
+int yylex(YYSTYPE* next_token, void* in_parser) {
+	if (in_parser == NULL) {
+		return 0;
+	}	
+	ParserState* cur_parser = static_cast<ParserState*>(in_parser);
+	cur_parser->set_parse_result(next_token);
+	return cur_parser->get_lex()->scan(cur_parser);
+}
+
+%}
+
+%union{
+	double 	 	d_val;
+	int		 	i_val;
+	string*  	s_val;
+	ASTType		v_val;
+	ASTNode*	n_val;
+};
+
+%token<s_val> IDENTIFIER STRING_LITERAL
+%token<i_val> INT_CONSTANT 
+%token<d_val> DOUBLE_CONSTANT
+%token INT DOUBLE STRING IF ELSE AND_OP OR_OP LEFT_OP RIGHT_OP LE_OP GE_OP
+%token SIN COS POW PRINT ROUND CEIL FLOOR EQ_OP NE_OP WHILE VOID DBL TAN ASIN
+%token ACOS ATAN CONTINUE BREAK RETURN STRUCT RPC ARRAY_SIZE LOG_OP EXP
+%token DNS_LOOKUP DNS_ADDR GET_SELF RING_GT RING_GE RING_LT RING_LE
+%token GET_DISTANCE_TCP GET_DISTANCE_DNS GET_DISTANCE_PING PUSH_BACK POP_BACK
+%token ARRAY_INTERSECT FOR PRINTLN ARRAY_AVG ARRAY_MAX ARRAY_MIN 
+%token ARRAY_MAX_OFFSET ARRAY_MIN_OFFSET ARRAY_UNION GET_DISTANCE_ICMP
+%type<v_val> type
+%type<n_val> primary_expression postfix_expression unary_expression
+%type<n_val> multiplicative_expression additive_expression assign_expression
+%type<n_val> expression declaration_statement statement statement_list
+%type<n_val> expression_statement compound_statement selection_statement
+%type<n_val> and_expression iteration_statement jump_statement
+%type<n_val> exclusive_or_expression
+%type<n_val> inclusive_or_expression
+%type<n_val> logical_and_expression expression_sep parameter_sep
+%type<n_val> logical_or_expression relational_expression shift_expression
+%type<n_val> input_state global_declaration parameter_array_fixed
+%type<n_val> equality_expression parameter_list parameter parameter_adt
+
+%start start_state
+%pure-parser
+%%
+
+start_state
+	: input_state 
+		{ 	ParserState* ps = static_cast<ParserState*>(param);
+			ps->set_start($1);
+		}
+	;
+
+input_state
+	:	/* Empty */
+		{ $$ = static_cast<ParserState*>(param)->empty_token(); }
+	| input_state global_declaration 
+		{ $$ = mk_node_list(static_cast<ParserState*>(param), $2, $1); }
+	;
+		
+global_declaration
+	: IDENTIFIER IDENTIFIER '(' parameter_sep ')' '{' statement_list '}'
+		{ 	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_function_declare(ps, ADT_TYPE, $1, EMPTY_TYPE, $2, $4, $7); 
+		}
+	| IDENTIFIER IDENTIFIER '(' ')' '{' statement_list '}'
+		{ 	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_function_declare(
+				ps, ADT_TYPE, $1, EMPTY_TYPE, $2, ps->empty_token(), $6); 
+		}				
+	| type IDENTIFIER '(' parameter_sep ')' '{' statement_list '}'
+		{ 	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_function_declare(ps, $1, NULL, EMPTY_TYPE, $2, $4, $7); 
+		}
+	| type IDENTIFIER '(' ')' '{' statement_list '}'
+		{ 	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_function_declare(
+				ps, $1, NULL, EMPTY_TYPE, $2, ps->empty_token(), $6); 
+		}
+	| IDENTIFIER '[' ']' IDENTIFIER '(' parameter_sep ')' '{' statement_list '}'
+		{ 	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_function_declare(ps, ARRAY_TYPE, $1, ADT_TYPE, $4, $6, $9); 
+		}
+	| IDENTIFIER '[' ']' IDENTIFIER '(' ')' '{' statement_list '}'
+		{ 	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_function_declare(
+				ps, ARRAY_TYPE, $1, ADT_TYPE, $4, ps->empty_token(), $8); 
+		}				
+	| type '[' ']' IDENTIFIER '(' parameter_sep ')' '{' statement_list '}'
+		{ 	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_function_declare(ps, ARRAY_TYPE, NULL, $1, $4, $6, $9); 
+		}
+	| type '[' ']' IDENTIFIER '(' ')' '{' statement_list '}'
+		{ 	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_function_declare(
+				ps, ARRAY_TYPE, NULL, $1, $4, ps->empty_token(), $8); 
+		}		
+	| STRUCT IDENTIFIER '{' parameter_list '}' ';'
+		{ 	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_adt(ps, $2, $4);
+		}	
+	;
+	
+parameter
+	: type IDENTIFIER
+		{ 	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_new_var(ps, $1, $2); 
+		}		
+	| type IDENTIFIER '[' ']'  			
+		{ 	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_new_var_array(ps, $1, $2, mk_int(ps, 0)); 
+		}
+	;
+		
+parameter_array_fixed
+	: parameter { $$ = $1; }
+	| type IDENTIFIER '[' INT_CONSTANT ']'  			
+		{ 	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_new_var_array(ps, $1, $2, mk_int(ps, $4)); 
+		}
+	;
+	
+// Parameter list cannot contain ADTs
+// Can contain fixed size arrays
+parameter_list
+	: parameter_array_fixed ';'	
+		{ 	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_sep_list(ps, $1); 
+		}	 
+	| parameter_list parameter_array_fixed ';'
+		{ 	$1->val.p_val.p_vector->push_back($2);
+			$$ = $1; 
+		}
+	;
+
+parameter_adt
+	: parameter	{ $$ = $1; }
+	| IDENTIFIER IDENTIFIER		
+		{ 	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_new_adt_var(ps, $1, $2); 
+		}
+	| IDENTIFIER IDENTIFIER '[' ']'		
+		{ 	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_new_adt_var_array(ps, $1, $2, mk_int(ps, 0)); 
+		}		
+	;
+
+// Can contain ADTs
+// Can only contain 0 sized arrays
+parameter_sep
+	: parameter_adt	
+		{ 	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_sep_list(ps, $1); 
+		}	
+	| parameter_sep ',' parameter_adt
+		{ 	$1->val.p_val.p_vector->push_back($3);
+			$$ = $1; 
+		}
+	;
+	
+expression_sep
+	: expression
+		{ 	ParserState* ps = static_cast<ParserState*>(param);	
+			$$ = mk_sep_list(ps, $1);
+		}
+	| expression_sep ',' expression
+		{ 	$1->val.p_val.p_vector->push_back($3);
+			$$ = $1; 
+		}
+	;
+
+statement_list
+	: /* Empty */				
+		{ $$ = static_cast<ParserState*>(param)->empty_token(); }
+	| statement_list statement	
+		{ $$ = mk_node_list(static_cast<ParserState*>(param), $2, $1); }
+	;
+		
+type
+	: INT 						{ $$ = INT_TYPE; }
+	| DOUBLE					{ $$ = DOUBLE_TYPE; }
+	| STRING					{ $$ = STRING_TYPE; }
+	| VOID						{ $$ = VOID_TYPE; }
+	;
+
+//	Making declaration a statement in this language
+declaration_statement
+	: parameter_adt ';' 	{$$ = $1;}
+	| type IDENTIFIER '[' expression ']' ';'  			
+		{ 	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_new_var_array(ps, $1, $2, $4); 
+		}		
+	| IDENTIFIER IDENTIFIER '[' expression']' ';'		
+		{ 	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_new_adt_var_array(ps, $1, $2, $4); 
+		}	
+	| type IDENTIFIER '=' expression ';'	
+		{ 	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_new_var_assign(ps, $1, $2, $4); 
+		}
+	| IDENTIFIER IDENTIFIER '=' expression ';'
+		{ 	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_new_adt_var_assign(ps, $1, $2, $4); 
+		}
+	| IDENTIFIER IDENTIFIER '=' '{' expression_sep '}' ';'
+		{ 	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_new_adt_var_assign(ps, $1, $2, $5); 
+		}
+	| type IDENTIFIER '[' ']' '=' expression ';'	
+		{ 	ParserState* ps = static_cast<ParserState*>(param);		
+			$$ = mk_new_var_array_assign(ps, $1, $2, $6, mk_int(ps, 0)); 
+		}
+	| type IDENTIFIER '[' ']' '=' '{' expression_sep '}' ';'	
+		{ 	ParserState* ps = static_cast<ParserState*>(param);		
+			$$ = mk_new_var_array_assign(ps, $1, $2, $7, mk_int(ps, 0)); 
+		}		
+	| IDENTIFIER IDENTIFIER '[' ']' '=' expression ';'
+		{ 	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_new_adt_var_array_assign(ps, $1, $2, $6, mk_int(ps, 0)); 
+		}
+	| IDENTIFIER IDENTIFIER '[' ']' '=' '{' expression_sep '}' ';'
+		{ 	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_new_adt_var_array_assign(ps, $1, $2, $7, mk_int(ps, 0)); 
+		}		
+	;
+		
+statement
+	: compound_statement		{ $$ = $1; }	
+	| selection_statement		{ $$ = $1; }
+	| expression_statement		{ $$ = $1; }
+	| declaration_statement		{ $$ = $1; }
+	| iteration_statement		{ $$ = $1; }
+	| jump_statement			{ $$ = $1; }
+	;
+	
+jump_statement
+	: CONTINUE ';'				
+		{	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = ps->continue_token();
+		}
+	| BREAK ';'
+		{	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = ps->break_token();
+		}
+	| RETURN expression ';'
+		{
+			ParserState* ps = static_cast<ParserState*>(param);			
+			$$ = mk_return(ps, $2);
+		}
+	| RETURN ';'
+		{
+			ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_return(ps, ps->empty_token());
+		}
+	;
+	
+iteration_statement
+	: WHILE '(' expression ')' compound_statement
+		{	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_loop(ps, $3, $5);			
+		}
+	| FOR '(' statement expression_statement expression ')' compound_statement
+		{	ParserState* ps = static_cast<ParserState*>(param);
+			// Give the for loop it's own context
+			$$ = mk_context(ps, mk_for_loop(ps, $3, $4, $5, $7));		
+		}
+	;
+		
+selection_statement
+	: IF '(' expression ')' compound_statement
+		{	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_selection(ps, $3, $5, ps->empty_token());
+		}
+	| IF '(' expression ')' compound_statement ELSE compound_statement 
+		{	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_selection(ps, $3, $5, $7);
+		}
+	| IF '(' expression ')' compound_statement ELSE selection_statement 
+		{	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_selection(ps, $3, $5, $7);
+		}
+	;
+		
+expression_statement
+	: ';'				
+		{ $$ = static_cast<ParserState*>(param)->empty_token(); }
+	| expression ';'	{ $$ = $1; }
+	;
+	
+compound_statement		
+	: '{' statement_list '}'
+		/*	Note that it traverse right to left */ 	
+		{  ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_context(ps, $2);
+		}								
+	;
+		
+primary_expression
+	: IDENTIFIER				
+		{ $$ = mk_ref_var(static_cast<ParserState*>(param), $1); }
+	| INT_CONSTANT 				
+		{ $$ = mk_int(static_cast<ParserState*>(param), $1); }
+	| DOUBLE_CONSTANT			
+		{ $$ = mk_double(static_cast<ParserState*>(param), $1); } 
+	| STRING_LITERAL			
+		{ $$ = mk_string(static_cast<ParserState*>(param), $1); } 
+	| '(' expression ')'		{ $$ = $2; }
+	;
+
+postfix_expression
+	: primary_expression		{ $$ = $1; }
+	| postfix_expression '.' IDENTIFIER
+		{ 	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_ref_adt_var(ps, $1, $3); 
+		}
+	| postfix_expression '[' expression ']'
+		{	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_ref_array_var(ps, $1, $3);
+		}
+	| PRINT '(' expression ')'
+		{ $$ = mk_print(static_cast<ParserState*>(param), $3); }
+	| PRINTLN '(' expression ')'
+		{ $$ = mk_println(static_cast<ParserState*>(param), $3); }		
+	| IDENTIFIER '(' expression_sep ')'
+		{ $$ = mk_function_ref(static_cast<ParserState*>(param), $1, $3); }
+	| IDENTIFIER '(' ')'
+		{ 	ParserState* ps = static_cast<ParserState*>(param); 
+			$$ = mk_function_ref(ps, $1, ps->empty_token()); 
+		}
+	| RPC '(' expression ',' IDENTIFIER ',' expression_sep ')'
+		{
+			ParserState* ps = static_cast<ParserState*>(param);	
+			$$ = mk_rpc(ps, $3, $5, $7);			
+		}
+	| RPC '(' expression ',' IDENTIFIER ')'
+		{
+			ParserState* ps = static_cast<ParserState*>(param);	
+			$$ = mk_rpc(ps, $3, $5, ps->empty_token());			
+		}				
+	| ROUND '(' expression ')'
+		{	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_native_func_1(ps, ROUND, $3);
+		}	
+	| CEIL '(' expression ')'
+		{	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_native_func_1(ps, CEIL, $3);
+		}	
+	| FLOOR '(' expression ')'
+		{	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_native_func_1(ps, FLOOR, $3);
+		}	
+	| SIN '(' expression ')'
+		{	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_native_func_1(ps, SIN, $3);
+		}	
+	| COS '(' expression ')'
+		{	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_native_func_1(ps, COS, $3);
+		}	
+	| POW '(' expression ',' expression ')'
+		{	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_native_func_2(ps, POW, $3, $5);
+		}
+	| DBL '(' expression ')'
+		{	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_native_func_1(ps, DBL, $3);
+		}
+	| TAN '(' expression ')'
+		{	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_native_func_1(ps, TAN, $3);
+		}	
+	| ASIN '(' expression ')'
+		{	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_native_func_1(ps, ASIN, $3);
+		}	
+	| ACOS '(' expression ')'
+		{	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_native_func_1(ps, ACOS, $3);
+		}	
+	| ATAN '(' expression ')'
+		{	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_native_func_1(ps, ATAN, $3);
+		}
+	| ARRAY_SIZE '(' expression ')'
+		{	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_native_func_1(ps, ARRAY_SIZE, $3);
+		}
+	| LOG_OP '(' expression ')'
+		{	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_native_func_1(ps, LOG_OP, $3);
+		}
+	| EXP '(' expression ')'
+		{	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_native_func_1(ps, EXP, $3);
+		}
+	| DNS_LOOKUP '(' expression ')'
+		{	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_native_func_1(ps, DNS_LOOKUP, $3);		
+		}
+	| DNS_ADDR '(' expression ')'
+		{	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_native_func_1(ps, DNS_ADDR, $3);		
+		}
+	| GET_SELF '(' ')'
+		{	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_native_func_0(ps, GET_SELF);
+		}
+	| RING_GT '(' expression ')'
+		{	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_native_func_1(ps, RING_GT, $3);
+		}
+	| RING_GE '(' expression ')'
+		{	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_native_func_1(ps, RING_GE, $3);
+		}
+	| RING_LT '(' expression ')'
+		{	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_native_func_1(ps, RING_LT, $3);
+		}
+	| RING_LE '(' expression ')'
+		{	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_native_func_1(ps, RING_LE, $3);
+		}
+	| PUSH_BACK '(' expression ',' expression ')'
+		{	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_native_func_2(ps, PUSH_BACK, $3, $5);
+		}
+	| POP_BACK '(' expression ')'
+		{	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_native_func_1(ps, POP_BACK, $3);
+		}
+	| GET_DISTANCE_TCP '(' expression ',' expression ')'
+		{	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_native_func_3(
+					ps, GET_DISTANCE_TCP, mk_empty(ps), $3, $5);
+		}		
+	| GET_DISTANCE_TCP '(' expression ',' expression ',' expression ')'
+		{	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_native_func_3(ps, GET_DISTANCE_TCP, $3, $5, $7);
+		}
+	| GET_DISTANCE_DNS '(' expression ',' expression ')'
+		{	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_native_func_3(
+				ps, GET_DISTANCE_DNS, mk_empty(ps), $3, $5);
+		}		
+	| GET_DISTANCE_DNS '(' expression ',' expression ',' expression ')'
+		{	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_native_func_3(ps, GET_DISTANCE_DNS, $3, $5, $7);
+		}
+	| GET_DISTANCE_PING '(' expression ',' expression ')'
+		{	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_native_func_3(
+				ps, GET_DISTANCE_PING, mk_empty(ps), $3, $5);
+		}				
+	| GET_DISTANCE_PING '(' expression ',' expression ',' expression ')'
+		{	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_native_func_3(ps, GET_DISTANCE_PING, $3, $5, $7);
+		}
+	| GET_DISTANCE_ICMP '(' expression ',' expression ')'
+		{	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_native_func_3(
+				ps, GET_DISTANCE_ICMP, mk_empty(ps), $3, $5);
+		}				
+	| GET_DISTANCE_ICMP '(' expression ',' expression ',' expression ')'
+		{	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_native_func_3(ps, GET_DISTANCE_ICMP, $3, $5, $7);
+		}
+	| ARRAY_INTERSECT '(' expression ',' expression ')'
+		{	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_native_func_2(ps, ARRAY_INTERSECT, $3, $5);		
+		}
+	| ARRAY_AVG '(' expression ')'
+		{	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_native_func_1(ps, ARRAY_AVG, $3);		
+		}
+	| ARRAY_MIN '(' expression ')'
+		{	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_native_func_1(ps, ARRAY_MIN, $3);		
+		}
+	| ARRAY_MAX '(' expression ')'
+		{	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_native_func_1(ps, ARRAY_MAX, $3);		
+		}
+	| ARRAY_MIN_OFFSET '(' expression ')'
+		{	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_native_func_1(ps, ARRAY_MIN_OFFSET, $3);		
+		}
+	| ARRAY_MAX_OFFSET '(' expression ')'
+		{	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_native_func_1(ps, ARRAY_MAX_OFFSET, $3);		
+		}
+	| ARRAY_UNION '(' expression ',' expression ')'
+		{	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_native_func_2(ps, ARRAY_UNION, $3, $5);		
+		}		
+	;
+
+unary_expression
+	: postfix_expression		{ $$ = $1; }
+	| '+' postfix_expression	{ $$ = $2; }
+	| '-' postfix_expression	
+		{ $$ = mk_unary(static_cast<ParserState*>(param), '-', $2); }
+	| '!' postfix_expression	
+		{ $$ = mk_unary(static_cast<ParserState*>(param), '!', $2); }
+	;
+	
+multiplicative_expression
+	: unary_expression			{ $$ = $1; }
+	| multiplicative_expression '*' unary_expression
+		{ $$ = mk_arith(static_cast<ParserState*>(param), '*', $1, $3); }
+	| multiplicative_expression '/' unary_expression
+		{ $$ = mk_arith(static_cast<ParserState*>(param), '/', $1, $3); }
+	| multiplicative_expression '%' unary_expression 
+		{ $$ = mk_arith(static_cast<ParserState*>(param), '%', $1, $3); }
+	;
+		
+additive_expression
+	: multiplicative_expression								{ $$ = $1; }	
+	| additive_expression '+' multiplicative_expression 
+		{ $$ = mk_arith(static_cast<ParserState*>(param), '+', $1, $3); }
+	| additive_expression '-' multiplicative_expression
+		{ $$ = mk_arith(static_cast<ParserState*>(param), '-', $1, $3); }
+	;
+	
+shift_expression
+	: additive_expression		{ $$ = $1; }
+	| shift_expression LEFT_OP additive_expression
+		{ $$ = mk_arith(static_cast<ParserState*>(param), LEFT_OP, $1, $3); }
+	| shift_expression RIGHT_OP additive_expression
+		{ $$ = mk_arith(static_cast<ParserState*>(param), RIGHT_OP, $1, $3); }
+	;
+
+relational_expression
+	: shift_expression			{ $$ = $1; }
+	| relational_expression '<' shift_expression
+		{ $$ = mk_arith(static_cast<ParserState*>(param), '<', $1, $3); }
+	| relational_expression '>' shift_expression
+		{ $$ = mk_arith(static_cast<ParserState*>(param), '>', $1, $3); }
+	| relational_expression LE_OP shift_expression
+		{ $$ = mk_arith(static_cast<ParserState*>(param), LE_OP, $1, $3); }	
+	| relational_expression GE_OP shift_expression
+		{ $$ = mk_arith(static_cast<ParserState*>(param), GE_OP, $1, $3); }
+	;
+
+equality_expression
+	: relational_expression		{ $$ = $1; }
+	| equality_expression EQ_OP relational_expression
+		{ $$ = mk_arith(static_cast<ParserState*>(param), EQ_OP, $1, $3); }
+	| equality_expression NE_OP relational_expression
+		{ $$ = mk_arith(static_cast<ParserState*>(param), NE_OP, $1, $3); }
+	;	
+
+and_expression
+	: equality_expression		{ $$ = $1; }
+	| and_expression '&' relational_expression
+		{ $$ = mk_arith(static_cast<ParserState*>(param), '&', $1, $3); }
+	;
+	
+exclusive_or_expression
+	: and_expression			{ $$ = $1; }
+	| exclusive_or_expression '^' and_expression
+		{ $$ = mk_arith(static_cast<ParserState*>(param), '^', $1, $3); }
+	;
+	
+inclusive_or_expression
+	: exclusive_or_expression	{ $$ = $1; }
+	| inclusive_or_expression '|' exclusive_or_expression
+		{ $$ = mk_arith(static_cast<ParserState*>(param), '|', $1, $3); }
+	;
+	
+logical_and_expression
+	: inclusive_or_expression	{ $$ = $1; }
+	| logical_and_expression AND_OP inclusive_or_expression	
+		{ $$ = mk_arith(static_cast<ParserState*>(param), AND_OP, $1, $3); }
+	;
+	
+logical_or_expression
+	: logical_and_expression	{ $$ = $1; }
+	| logical_or_expression OR_OP logical_and_expression
+		{ $$ = mk_arith(static_cast<ParserState*>(param), OR_OP, $1, $3); } 
+	;
+	
+assign_expression
+	: logical_or_expression		{ $$ = $1; }
+	| postfix_expression '=' assign_expression
+		{ 	ParserState* ps = static_cast<ParserState*>(param);
+			$$ = mk_adt_assign(ps, $1, $3);
+		}
+	;
+	
+expression				
+	: assign_expression			{ $$ = $1;}	
+	;
+	
+%%
+
