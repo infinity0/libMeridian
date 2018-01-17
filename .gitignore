@@ -1,0 +1,18 @@
+# autoreconf -i
+/INSTALL
+/Makefile.in
+/aclocal.m4
+/autom4te.cache/
+/compile
+/config.h.in
+/configure
+/depcomp
+/install-sh
+/missing
+# ./configure
+/.deps/
+/Makefile
+/config.h
+/config.log
+/config.status
+/stamp-h1
