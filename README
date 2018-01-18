@@ -147,32 +147,8 @@ dependencies are now the following:
 	
 The build has been tested on FC4, with gcc 4.0.1, flex 2.5.4, and bison 2.0. 
 Ubuntu 4 packages flex 2.5.31, which breaks the build process (this was
-first noted by Leandro Navarro). His fix for the problem is copied below.
-
-> leandro@bastian:~/pl/Meridian/src$ make APPNAME="sodx"
-> flex -oMQL.flex.cpp MQL.lex
-> g++ -c -I. -I../extinc -O2 -Wall -DGOSSIP_PUSHPULL -DMERIDIAN_DSL
-> -DPLANET_LAB_SUPPORT -DAPPNAME="sodx" -I. -o MQL.flex.o MQL.flex.cpp
-> /usr/include/FlexLexer.h:112: error: redefinition of 'class yyFlexLexer'
-> /usr/include/FlexLexer.h:112: error: previous definition of 'class
-> yyFlexLexer'
-> make: *** [MQL.flex.o] Error 1
-> rm MQL.flex.cpp
->
-> I could not find initially the problem since MQL.flex.cpp was removed by
-> the Makefile.
-> In that file I found in the beginning:
->
->    /* The c++ scanner is a mess. The FlexLexer.h header file relies on the
->     * following macro.
->     */
->    #define yyFlexLexer yyFlexLexer
-> When I commented this line, it worked !!
-
-This looks like a bug in flex, or perhaps there has been a major interface
-change in the new version. I'll try to find a better workaround for the next
-version of the Meridian library. Currently, I suggest sticking with flex 2.5.4.
-Flex 2.5.33 is also available now, perhaps this problem may have been addressed.  
+first noted by Leandro Navarro). A fix has now been applied and older versions
+of Flex may break. (-- infinity0)
 
 Please e-mail me at bwong@cs.cornell.edu for any suggestions, questions or 
 problems, I'll be happy to help.

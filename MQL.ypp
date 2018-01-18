@@ -34,15 +34,16 @@ using namespace std;
 #include "MQLState.h"
 #include "MeridianDSL.h"
 
-#define YYPARSE_PARAM param
-#define YYLEX_PARAM param
-
+%}
+%parse-param   {void *param}
+%lex-param   {void *param}
+%{
 
 ucontext_t global_env_thread;	// For ending an intepreter immediately
 //jmp_buf global_env_pc;		// For switching between threads
 //ucontext_t* global_env_pc = NULL;
 
-void yyerror(const char *str) {
+void yyerror(void*, const char *str) {
 	DSL_ERROR( "%s: line %d\n", str, g_parser_line);
 }
 

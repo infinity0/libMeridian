@@ -19,15 +19,14 @@ AC_PROG_RANLIB
 # is in the atlas directory
 LIBS="-L/usr/lib/atlas -L/usr/lib64/atlas ${LIBS}"
 # Checks for libraries.
-AC_CHECK_LIB([cblas], [cblas_dcopy], , AC_MSG_ERROR(Library required))
-AC_CHECK_LIB([blas], [atl_f77wrap_cgemm_], , AC_MSG_ERROR(Library required))
-AC_CHECK_LIB([crypto], [MD5_Init], , AC_MSG_ERROR(Library required))
-AC_CHECK_LIB([curl], [curl_easy_init], , AC_MSG_ERROR(Library required))
-AC_CHECK_LIB([dl], [dlopen], , AC_MSG_ERROR(Library required))
-AC_CHECK_LIB([gfortran], [f2c_specific__abs_r4], , AC_MSG_ERROR(Library required))
-AC_CHECK_LIB([qhull], [qh_freeqhull], , AC_MSG_ERROR(Library required))
-AC_CHECK_LIB([resolv], [res_gethostbyaddr], , AC_MSG_ERROR(Library required))
-AC_CHECK_LIB([z], [deflate], , AC_MSG_ERROR(Library required))
+AC_CHECK_LIB([cblas], [cblas_dcopy], , AC_MSG_ERROR(Library cblas required))
+AC_CHECK_LIB([blas], [atl_f77wrap_cgemm_], , AC_MSG_ERROR(Library blas required))
+AC_CHECK_LIB([crypto], [MD5_Init], , AC_MSG_ERROR(Library crypto required))
+AC_CHECK_LIB([curl], [curl_easy_init], , AC_MSG_ERROR(Library curl required))
+AC_CHECK_LIB([dl], [dlopen], , AC_MSG_ERROR(Library dl required))
+AC_CHECK_LIB([gfortran], [_gfortran_f2c_specific__abs_r4], , AC_MSG_ERROR(Library gfortran required))
+AC_CHECK_LIB([qhull], [qh_freeqhull], , AC_MSG_ERROR(Library qhull required))
+AC_CHECK_LIB([z], [deflate], , AC_MSG_ERROR(Library z required))
 
 # Checks for header files.
 AC_HEADER_STDC

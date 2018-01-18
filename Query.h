@@ -11,7 +11,7 @@
 
 extern "C" {
 	#include <qhull/qhull.h>
-	#include <atlas/cblas.h>	
+	#include <cblas-atlas.h>
 }
 
 class MeridianProcess;

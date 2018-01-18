@@ -2,6 +2,8 @@ D			[0-9]
 L			[a-zA-Z_]
 
 %{
+/* Work around a flex issue on modern systems. */
+#undef yyFlexLexer
 /******************************************************************************
 Meridian prototype distribution
 Copyright (C) 2005 Bernard Wong

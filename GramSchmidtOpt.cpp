@@ -28,7 +28,7 @@ using namespace std;
 #include "GramSchmidtOpt.h"
 
 extern "C" {
-	#include <atlas/cblas.h>
+	#include <cblas-atlas.h>
 }
 
 int GramSchmidtOpt::addVector(double* inVector) {
